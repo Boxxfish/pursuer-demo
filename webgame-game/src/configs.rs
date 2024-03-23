@@ -12,6 +12,7 @@ use crate::{
     gridworld::{GridworldPlayPlugin, GridworldPlugin},
     net::NetPlugin,
     observer::{ObserverPlayPlugin, ObserverPlugin},
+    world_objs::{WorldObjPlayPlugin, WorldObjPlugin},
 };
 
 /// Handles core functionality for our game (i.e. gameplay logic).
@@ -20,7 +21,7 @@ pub struct CoreGamePlugin;
 impl Plugin for CoreGamePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0))
-            .add_plugins((NetPlugin, GridworldPlugin, ObserverPlugin));
+            .add_plugins((NetPlugin, GridworldPlugin, ObserverPlugin, WorldObjPlugin));
     }
 }
 
@@ -39,7 +40,7 @@ impl Plugin for PlayablePlugin {
                 ..default()
             }))
             .add_plugins(RapierDebugRenderPlugin::default())
-            .add_plugins((GridworldPlayPlugin, ObserverPlayPlugin));
+            .add_plugins((GridworldPlayPlugin, ObserverPlayPlugin, WorldObjPlayPlugin));
     }
 }
 

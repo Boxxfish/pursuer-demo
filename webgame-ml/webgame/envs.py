@@ -80,7 +80,7 @@ class GameEnv(pettingzoo.ParallelEnv):
 
     @functools.lru_cache(maxsize=None)
     def action_space(self, _: str) -> gym.Space:
-        return gym.spaces.Discrete(9)
+        return gym.spaces.Discrete(10)
 
     @functools.lru_cache(maxsize=None)
     def observation_space(self, _: str) -> gym.Space:

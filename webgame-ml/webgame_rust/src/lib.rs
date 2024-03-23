@@ -79,6 +79,7 @@ pub enum AgentAction {
     MoveDownLeft = 6,
     MoveLeft = 7,
     MoveUpLeft = 8,
+    ToggleObj = 9,
 }
 
 impl<'source> FromPyObject<'source> for AgentAction {
@@ -139,6 +140,7 @@ fn set_agent_action<T: Component>(world: &mut World, action: AgentAction) {
         AgentAction::MoveUpLeft => (Vec2::Y + -Vec2::X).normalize(),
         _ => Vec2::ZERO,
     };
+    action.toggle_obj = action == AgentAction::ToggleObj;
 }
 
 /// Queries the world for an agent with the provided component and returns an `AgentState`.
