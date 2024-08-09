@@ -210,12 +210,14 @@ fn handle_key_touch(
                     commands.entity(door_e).remove::<(Wall, Collider)>();
                 }
                 for vis_e in door_vis_query.iter() {
-                    let anim_e = get_entity(&vis_e, &["", "doorway(Clone)"], &child_query).unwrap();
-                    let mut anim = anim_query.get_mut(anim_e).unwrap();
-                    anim.play_with_transition(
-                        asset_server.load("furniture/doorway.glb#Animation0"),
-                        Duration::from_secs_f32(0.0),
-                    );
+                    let anim_e = get_entity(&vis_e, &["", "doorway(Clone)"], &child_query);
+                    if let Some(anim_e) = anim_e {
+                        let mut anim = anim_query.get_mut(anim_e).unwrap();
+                        anim.play_with_transition(
+                            asset_server.load("furniture/doorway.glb#Animation0"),
+                            Duration::from_secs_f32(0.0),
+                        );
+                    }
                 }
             }
         }

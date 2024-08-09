@@ -15,7 +15,7 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use crate::{
-    agents::{Agent, AgentVisuals, NextAction, PlayerAgent, PursuerAgent},
+    agents::{Agent, AgentVisuals, NeuralPolicy, NextAction, PathfindingPolicy, PlayerAgent, PursuerAgent},
     configs::IsPlayable,
     filter::BayesFilter,
     observer::{DebugObserver, Observable, Observer, Wall},
@@ -55,9 +55,6 @@ impl Plugin for GridworldPlayPlugin {
             );
     }
 }
-
-/// The width and height of the level by default.
-pub const DEFAULT_LEVEL_SIZE: usize = 8;
 
 pub const GRID_CELL_SIZE: f32 = 25.;
 
@@ -266,7 +263,7 @@ fn setup_entities(
             });
 
             let pursuer_tile_idx = match &level.pursuer_start {
-                Some((x, y)) => y * level.size + x,
+                Some((x, y)) => (level.size - y - 1) * level.size + x,
                 None => level.get_empty(),
             };
             p.spawn((
@@ -283,6 +280,7 @@ fn setup_entities(
                         0.,
                     ) * GRID_CELL_SIZE,
                 )),
+                NeuralPolicy,
                 Observer::default(),
                 Observable,
                 DebugObserver,
@@ -302,7 +300,7 @@ fn setup_entities(
                 }
             });
             let player_tile_idx = match &level.player_start {
-                Some((x, y)) => y * level.size + x,
+                Some((x, y)) => (level.size - y - 1) * level.size + x,
                 None => level.get_empty(),
             };
             p.spawn((
@@ -321,7 +319,6 @@ fn setup_entities(
                 )),
                 Observer::default(),
                 Observable,
-                DebugObserver,
             ))
             .with_children(|p| {
                 if is_playable.is_some() {
@@ -351,7 +348,7 @@ fn setup_entities(
             });
 
             // Set up walls and doors
-            let wall_mesh = meshes.add(Cuboid::new(GRID_CELL_SIZE, GRID_CELL_SIZE, GRID_CELL_SIZE));
+            let wall_mesh = meshes.add(Cuboid::new(GRID_CELL_SIZE, GRID_CELL_SIZE, 0.1));
             let wall_mat = materials.add(StandardMaterial {
                 base_color: Color::BLACK,
                 unlit: true,
@@ -462,7 +459,7 @@ fn setup_entities(
                             mesh: meshes.add(Cuboid::new(
                                 half_sizes[i / 2] * 2.,
                                 half_sizes[1 - i / 2] * 2.,
-                                GRID_CELL_SIZE,
+                                0.1,
                             )),
                             material: wall_mat.clone(),
                             ..default()
@@ -525,7 +522,7 @@ fn setup_entities(
                             mesh: meshes.add(Cuboid::new(
                                 collider_size,
                                 collider_size,
-                                collider_size,
+                                0.1,
                             )),
                             material: obj_mat.clone(),
                             ..default()

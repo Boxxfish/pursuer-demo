@@ -53,11 +53,12 @@ class GameState:
     noise_sources: Mapping[int, NoiseSourceObj]
 
 class GameWrapper:
-    def __init__(self, use_objs: bool, wall_prob: float, visualize: bool, recording_id: Optional[str]) -> None:
+    def __init__(self, use_objs: bool, wall_prob: float, grid_size: int, visualize: bool, recording_id: Optional[str]) -> None:
         """
         Args:
             use_objs: Whether the environment should add objects to the scene.
             wall_prob: Probability of each tile being a wall.
+            grid_size: Size of the grid.
             visualize: If we should log visuals to Rerun.
             recording_id: Recording ID used by Rerun. Useful for syncing data between Python and Rust.
         """

@@ -32,21 +32,15 @@ pub fn encode_obs(
     player_e: Entity,
     level: &Res<LevelLayout>,
     agent_state: &AgentState,
+    filter_probs: &Tensor,
 ) -> candle_core::Result<(Tensor, Tensor, Tensor)> {
     // Set up observations
-    let player_obs = agent_state.objects.get(&player_e).unwrap();
     let device = Device::Cpu;
-    let mut obs_vec = vec![0.; 7];
+    let mut obs_vec = vec![0.; 4];
     obs_vec[0] = 0.5 + agent_state.pos.x / (level.size as f32 * GRID_CELL_SIZE);
     obs_vec[1] = 0.5 + agent_state.pos.y / (level.size as f32 * GRID_CELL_SIZE);
     obs_vec[2] = agent_state.dir.x;
     obs_vec[3] = agent_state.dir.y;
-
-    if agent_state.observing.contains(&player_e) {
-        obs_vec[4] = 1.;
-        obs_vec[5] = 0.5 + player_obs.pos.x / (level.size as f32 * GRID_CELL_SIZE);
-        obs_vec[6] = 0.5 + player_obs.pos.y / (level.size as f32 * GRID_CELL_SIZE);
-    }
 
     let walls = Tensor::from_slice(
         &level
@@ -89,7 +83,7 @@ pub fn encode_obs(
     for i in num_objs..attn_mask.len() {
         attn_mask[i] = 1.;
     }
-    let filter_probs = Tensor::zeros(walls.shape(), DType::F32, &device)?;
+    let filter_probs = filter_probs.reshape(&[level.size, level.size])?;
     let grid = Tensor::stack(
         &[
             &walls,
@@ -101,7 +95,7 @@ pub fn encode_obs(
 
     // Combine scalar observations with grid
     let scalar_grid = Tensor::from_slice(&obs_vec, &[obs_vec.len()], &device)?
-        .reshape(&[7, 1, 1])?
+        .reshape(&[4, 1, 1])?
         .repeat(&[1, level.size, level.size])?;
     let grid = Tensor::cat(&[&scalar_grid, &grid], 0)?;
 

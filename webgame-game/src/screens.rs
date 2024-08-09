@@ -149,9 +149,6 @@ fn init_loading(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn(NNWrapper::<PolicyNet>::with_sftensors(
         asset_server.load("p_net.safetensors"),
     ));
-    commands.spawn(NNWrapper::<MeasureModel>::with_sftensors(
-        asset_server.load("model.safetensors"),
-    ));
     let mut handles = Vec::new();
     for (path, asset_type) in ASSETS_TO_LOAD {
         match asset_type {
@@ -210,12 +207,13 @@ struct TransitionNextState<T>(pub T);
 fn init_ui(mut commands: Commands) {
     commands.spawn(ScreenTransitionBundle::default());
     let cam_angle = (20.0_f32).to_radians();
-    let cam_dist = 700.;
+    let cam_dist = 1200.;
+    let size = 16;
     commands.spawn((
         Camera3dBundle {
             transform: Transform::from_translation(Vec3::new(
-                GRID_CELL_SIZE * (((8 + 1) / 2) as f32),
-                -cam_angle.sin() * cam_dist + GRID_CELL_SIZE * (((8 + 1) / 2) as f32),
+                GRID_CELL_SIZE * (((size + 1) / 2) as f32),
+                -cam_angle.sin() * cam_dist + GRID_CELL_SIZE * (((size + 1) / 2) as f32),
                 cam_angle.cos() * cam_dist,
             ))
             .with_rotation(Quat::from_rotation_x(cam_angle)),
@@ -587,7 +585,7 @@ fn init_level_select(
                     ..default()
                 })
                 .with_children(|p| {
-                    for level in ["test", "test", "test"] {
+                    for level in ["1", "2", "3", "4"] {
                         let image = asset_server.load(format!("ui/level_select/{level}.png"));
                         p.spawn((
                             MenuButtonBundle::from_image(image),

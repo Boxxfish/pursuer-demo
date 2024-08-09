@@ -19,10 +19,16 @@ pub struct ObserverPlugin;
 
 impl Plugin for ObserverPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (update_observers.after(move_agents), update_vm_data),
-        );
+        app.add_systems(Update, (update_vm_data, add_vis_cones))
+            .add_systems(
+                PostUpdate,
+                (
+                    update_observers.after(bevy_rapier2d::plugin::PhysicsSet::Writeback),
+                    draw_observer_areas
+                        .after(update_observers)
+                        .after(add_vis_cones),
+                ),
+            );
     }
 }
 
@@ -30,17 +36,7 @@ impl Plugin for ObserverPlugin {
 pub struct ObserverPlayPlugin;
 
 impl Plugin for ObserverPlayPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                add_vis_cones,
-                draw_observer_areas
-                    .after(update_observers)
-                    .after(add_vis_cones),
-            ),
-        );
-    }
+    fn build(&self, app: &mut App) {}
 }
 
 /// Stores visual marker data for an observer
@@ -281,13 +277,22 @@ fn add_vis_cones(
     }
 }
 
+/// Forces cones to be regenerated on each frame.
+#[derive(Resource)]
+pub struct RegenerateCones;
+
 /// Draws visible areas for observers.
 fn draw_observer_areas(
-    observer_query: Query<(&Observer, &Children, &GlobalTransform), With<DebugObserver>>,
-    mut vis_cone_query: Query<(&Handle<Mesh>, &mut Transform), With<VisCone>>,
+    observer_query: Query<(Entity, &Observer, &Children, &GlobalTransform), With<DebugObserver>>,
+    mut vis_cone_query: Query<
+        (&Handle<Mesh>, &mut Transform, &Handle<StandardMaterial>),
+        With<VisCone>,
+    >,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut commands: Commands,
+    regen_cones: Option<Res<RegenerateCones>>,
 ) {
-    for (observer, children, xform) in observer_query.iter() {
+    for (obs_e, observer, children, xform) in observer_query.iter() {
         let mut vertices = Vec::new();
         for tri in &observer.vis_mesh {
             vertices.push([tri[0].x, tri[0].y, 2.]);
@@ -295,12 +300,26 @@ fn draw_observer_areas(
             vertices.push([tri[2].x, tri[2].y, 2.]);
         }
         for child in children.iter() {
-            if let Ok((mesh, mut cone_xform)) = vis_cone_query.get_mut(*child) {
-                if let Some(mesh) = meshes.get_mut(mesh) {
+            if let Ok((mesh_handle, mut cone_xform, material)) = vis_cone_query.get_mut(*child) {
+                if let Some(mesh) = meshes.get_mut(mesh_handle) {
                     *cone_xform = Transform::from_matrix(xform.compute_matrix().inverse());
                     *mesh = mesh
                         .clone()
-                        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vertices)
+                        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vertices.clone());
+                    if regen_cones.is_some() {
+                        commands.entity(*child).despawn_recursive();
+                        commands.entity(obs_e).with_children(|p| {
+                            p.spawn((
+                                PbrBundle {
+                                    mesh: mesh_handle.clone(),
+                                    material: material.clone(),
+                                    transform: *cone_xform,
+                                    ..default()
+                                },
+                                VisCone,
+                            ));
+                        });
+                    }
                 }
                 break;
             }

@@ -1,4 +1,8 @@
-use std::{f32::consts::PI, time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    f32::consts::PI,
+    time::Duration,
+};
 
 use bevy::{prelude::*, sprite::Mesh2dHandle};
 use bevy_rapier2d::control::KinematicCharacterController;
@@ -6,6 +10,7 @@ use candle_core::Tensor;
 use rand::distributions::Distribution;
 
 use crate::{
+    filter::{pos_to_grid, BayesFilter},
     gridworld::{LevelLayout, ShouldRun, GRID_CELL_SIZE},
     models::PolicyNet,
     net::{load_weights_into_net, NNWrapper},
@@ -41,7 +46,8 @@ impl Plugin for AgentPlayPlugin {
             (
                 (
                     set_player_action,
-                    set_pursuer_action,
+                    set_pursuer_action_neural,
+                    set_pursuer_action_pathfinding,
                     visualize_act_probs,
                     update_observations.after(update_vm_data),
                 )
@@ -85,6 +91,14 @@ impl Default for PursuerAgent {
     }
 }
 
+/// Denotes that the Pursuer should be controlled by a neural network.
+#[derive(Component)]
+pub struct NeuralPolicy;
+
+/// Denotes that the Pursuer should use pathfinding.
+#[derive(Component)]
+pub struct PathfindingPolicy;
+
 /// Updates the Pursuer's observations.
 #[allow(clippy::too_many_arguments)]
 pub fn update_observations(
@@ -92,6 +106,7 @@ pub fn update_observations(
     p_query: Query<(&Agent, &GlobalTransform, &Observer), With<PursuerAgent>>,
     time: Res<Time>,
     observable_query: Query<(Entity, &GlobalTransform), With<Observable>>,
+    filter_query: Query<&BayesFilter>,
     noise_query: Query<(Entity, &GlobalTransform, &NoiseSource)>,
     level: Res<LevelLayout>,
     player_query: Query<Entity, With<PlayerAgent>>,
@@ -109,8 +124,10 @@ pub fn update_observations(
                     &observable_query,
                     &noise_query,
                 );
-                let (grid, _, _) = encode_obs(player_e, &level, &agent_state).unwrap();
-                pursuer.observations = Some((grid, None, None));
+                let filter = filter_query.single();
+                let (grid, objs, objs_attn) =
+                    encode_obs(player_e, &level, &agent_state, &filter.probs).unwrap();
+                pursuer.observations = Some((grid, Some(objs), Some(objs_attn)));
                 pursuer.agent_state = Some(agent_state);
             }
         }
@@ -281,10 +298,13 @@ fn set_player_action(
     }
 }
 
-/// Updates the Pursuer's next action.
-fn set_pursuer_action(
+/// Updates the Pursuer's next action with a neural policy.
+fn set_pursuer_action_neural(
     net_query: Query<&NNWrapper<PolicyNet>>,
-    mut pursuer_query: Query<(&mut NextAction, &mut PursuerAgent, &GlobalTransform)>,
+    mut pursuer_query: Query<
+        (&mut NextAction, &mut PursuerAgent, &GlobalTransform),
+        With<NeuralPolicy>,
+    >,
     player_query: Query<(Entity, &GlobalTransform), With<PlayerAgent>>,
 ) {
     if let Ok((mut next_action, mut pursuer, pursuer_xform)) = pursuer_query.get_single_mut() {
@@ -350,6 +370,95 @@ fn set_pursuer_action(
     }
 }
 
+/// Updates the Pursuer's next action with a pathfinding policy.
+fn set_pursuer_action_pathfinding(
+    net_query: Query<&NNWrapper<PolicyNet>>,
+    mut pursuer_query: Query<
+        (&mut NextAction, &mut PursuerAgent, &GlobalTransform),
+        With<PathfindingPolicy>,
+    >,
+    filter_query: Query<&BayesFilter>,
+    player_query: Query<(Entity, &GlobalTransform), With<PlayerAgent>>,
+    level: Res<LevelLayout>,
+) {
+    if let Ok((mut next_action, mut pursuer, pursuer_xform)) = pursuer_query.get_single_mut() {
+        let p_net = net_query.single();
+        if let Some(net) = &p_net.net {
+            if pursuer.obs_timer.just_finished() {
+                // Identify most probable tile
+                let tile_idx = filter_query
+                    .single()
+                    .probs
+                    .flatten(0, 1)
+                    .unwrap()
+                    .argmax(0)
+                    .unwrap()
+                    .to_scalar::<u32>()
+                    .unwrap() as usize;
+                let x = tile_idx % level.size;
+                let y = tile_idx / level.size;
+
+                // Pathfind from current tile to target tile
+                let mut queue = VecDeque::new();
+                let mut parents = HashMap::new();
+                let xlation = pursuer_xform.translation();
+                let goal_pos = pos_to_grid(xlation.x, xlation.y, GRID_CELL_SIZE);
+                queue.push_back((x, y));
+                loop {
+                    let curr_tile = queue.pop_front().unwrap();
+                    if curr_tile == goal_pos {
+                        break;
+                    }
+                    let neighbors = [
+                        (curr_tile.0 as i32 + 1, curr_tile.1 as i32),
+                        (curr_tile.0 as i32 - 1, curr_tile.1 as i32),
+                        (curr_tile.0 as i32, curr_tile.1 as i32 + 1),
+                        (curr_tile.0 as i32, curr_tile.1 as i32 - 1),
+                    ];
+                    for n in neighbors {
+                        if n.0 > 0
+                            && n.0 < level.size as i32 - 1
+                            && n.1 > 0
+                            && n.1 < level.size as i32 - 1
+                            && !level.walls[n.1 as usize * level.size + n.0 as usize]
+                            && !parents.contains_key(&n)
+                        {
+                            queue.push_back((n.0 as usize, n.1 as usize));
+                            parents.insert(n, curr_tile);
+                        }
+                    }
+                }
+                let next_tile = parents
+                    .get(&(goal_pos.0 as i32, goal_pos.1 as i32))
+                    .unwrap();
+                let mut dir = Vec2::new(next_tile.0 as f32, next_tile.1 as f32) * GRID_CELL_SIZE + 0.5
+                    - pursuer_xform.translation().xy();
+                dir = dir.normalize();
+
+                // Beeline towards player if in sight
+                let (player_e, player_xform) = player_query.single();
+                if pursuer
+                    .agent_state
+                    .as_ref()
+                    .unwrap()
+                    .observing
+                    .contains(&player_e)
+                {
+                    let offset = player_xform.translation().xy() - pursuer_xform.translation().xy();
+                    dir = offset.normalize();
+                }
+
+                next_action.dir = dir;
+                next_action.toggle_objs = false;
+            }
+        }
+    }
+}
+
+/// If present, causes positions to be locked to a grid.
+#[derive(Resource)]
+pub struct UseGridPositions;
+
 /// Moves agents around.
 pub fn move_agents(
     mut agent_query: Query<(
@@ -358,20 +467,34 @@ pub fn move_agents(
         &mut KinematicCharacterController,
         &NextAction,
         &Children,
+        &GlobalTransform,
     )>,
     child_query: Query<(Entity, Option<&Name>, Option<&Children>)>,
     mut vis_query: Query<&mut Transform, With<AgentVisuals>>,
     mut anim_query: Query<&mut AnimationPlayer>,
     time: Res<Time>,
     asset_server: Res<AssetServer>,
+    use_grid: Option<Res<UseGridPositions>>,
 ) {
-    for (agent_e, mut agent, mut controller, next_action, children) in agent_query.iter_mut() {
+    for (agent_e, mut agent, mut controller, next_action, children, xform) in agent_query.iter_mut()
+    {
         let dir = next_action.dir;
         let anim_e = get_entity(&agent_e, &["", "", "Root"], &child_query);
         if dir.length_squared() > 0.1 {
             let dir = dir.normalize();
             agent.dir = dir;
-            controller.translation = Some(dir * AGENT_SPEED * time.delta_seconds());
+            if use_grid.is_some() {
+                let pos = xform.translation().xy() + dir * GRID_CELL_SIZE;
+                let (x, y) = pos_to_grid(pos.x, pos.y, GRID_CELL_SIZE);
+                let new_pos = Vec2::new(
+                    x as f32 * GRID_CELL_SIZE + 0.5,
+                    y as f32 * GRID_CELL_SIZE + 0.5,
+                );
+                controller.translation = Some(new_pos - xform.translation().xy());
+            } else {
+                let xlation = dir * AGENT_SPEED * time.delta_seconds();
+                controller.translation = Some(xlation);
+            }
             if let Some(anim_e) = anim_e {
                 if let Ok(mut anim) = anim_query.get_mut(anim_e) {
                     for child in children.iter() {

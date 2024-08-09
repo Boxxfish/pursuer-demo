@@ -15,6 +15,7 @@ def train_ppo(
     p_opt: torch.optim.Optimizer,
     v_opt: torch.optim.Optimizer,
     buffer: RolloutBuffer,
+    other: RolloutBuffer,
     device: torch.device,
     train_iters: int,
     train_batch_size: int,
@@ -49,14 +50,17 @@ def train_ppo(
     v_opt.zero_grad()
 
     for _ in tqdm(range(train_iters), position=1):
-        batches = buffer.samples(train_batch_size, discount, lambda_, v_net_frozen)
+        batches = buffer.samples_global(train_batch_size, discount, lambda_, v_net_frozen, other)
         for (
             i,
-            (prev_states_all, actions, action_probs, returns, advantages, action_masks),
+            (prev_states_all, prev_states_all_combined, actions, action_probs, returns, advantages, action_masks),
         ) in enumerate(batches):
             # Move batch to device if applicable
             prev_states = [
                 prev_states.to(device=device) for prev_states in prev_states_all
+            ]
+            prev_states_combined = [
+                prev_states_combined.to(device=device) for prev_states_combined in prev_states_all_combined
             ]
             actions = actions.to(device=device)
             action_probs = action_probs.to(device=device)
@@ -85,7 +89,7 @@ def train_ppo(
             total_p_loss += p_loss.item()
 
             # Train value network
-            diff = v_net(*prev_states) - returns
+            diff = v_net(*prev_states_combined) - returns
             v_loss = (diff * diff).mean() / gradient_steps
             v_loss.backward()
             total_v_loss += v_loss.item()

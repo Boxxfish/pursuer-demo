@@ -112,8 +112,8 @@ fn construct_menu_btns(
             MenuButtonContent::Image(image) => {
                 p.spawn(ImageBundle {
                     style: Style {
-                        width: Val::Px(128.),
-                        height: Val::Px(128.),
+                        width: Val::Px(120.),
+                        height: Val::Px(120.),
                         ..default()
                     },
                     image: UiImage::new(image.clone()),
